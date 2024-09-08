@@ -1,0 +1,119 @@
+	@PostMapping("/process")
+	public ResponseEntity<String> processFiles(@RequestParam("files") MultipartFile[] files,
+			@RequestParam("param1") String param1, @RequestParam("param2") String param2) {
+		try {
+			// 1. 取得多個上傳檔案
+			if (files == null || files.length == 0) {
+				return ResponseEntity.badRequest().body("No files uploaded.");
+			}
+
+			// 建立檔案儲存路徑
+			File tempFile = new File ("D:/upload");
+			if(!tempFile.exists()) {
+				tempFile.mkdirs();
+			}
+			// 2. 寫入 dat 檔，內容是檔案檔名
+			File datFile = genDatFile(files, tempFile);
+
+			// 3. 將上傳檔案和 dat 檔壓縮成一個 zip
+			File zipFile = zipDirectory(files, tempFile, datFile);
+
+			// 4. 呼叫 API 傳送檔案和參數
+			String apiUrl = "https://api.example.com/upload"; // 替換為實際的 API URL
+			RestTemplate restTemplate = new RestTemplate();
+			HttpHeaders headers = new HttpHeaders();
+			headers.setContentType(MediaType.MULTIPART_FORM_DATA);
+
+			MultiValueMap<String, Object> body = new LinkedMultiValueMap<>();
+			body.add("file", new FileSystemResource(zipFile));
+			body.add("param1", param1);
+			body.add("param2", param2);
+
+			HttpEntity<MultiValueMap<String, Object>> requestEntity = new HttpEntity<>(body, headers);
+			ResponseEntity<String> response = restTemplate.postForEntity(apiUrl, requestEntity, String.class);
+
+			// 5.刪除臨時文件
+			deleteDirectory(tempFile);
+
+			return ResponseEntity.ok("Files processed and sent. API response: " + response.getBody());
+		} catch (Exception e) {
+			e.printStackTrace();
+			return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+					.body("Error processing files: " + e.getMessage());
+		}
+	}
+
+
+	/**
+	 * 寫入 dat 檔，內容是檔案檔名
+	 * @param files
+	 * @param tempFile
+	 * @return
+	 * @throws IOException
+	 */
+	private File genDatFile(MultipartFile[] files, File tempFile) throws IOException {
+		File datFile = new File(tempFile, "filelist.dat");
+		List<String> fileNames = new ArrayList<>();
+		for (MultipartFile file : files) {
+			String fileName = file.getOriginalFilename();
+			fileNames.add(fileName);
+		}
+		FileWriter fw = new FileWriter(datFile);
+		String s  = String.join("\n", fileNames);
+		fw.write(s);
+		fw.close();
+		return datFile;
+	}
+    
+	/**
+	 * 將上傳檔案和 dat 檔壓縮成一個 zip
+	 * 
+	 * @param directory
+	 * @param zipFile
+	 * @throws IOException
+	 */
+	private File zipDirectory(MultipartFile[] directory, File tempFile, File datFile) throws IOException {
+		File zipFile = new File(tempFile, "111.zip");
+		FileOutputStream fos = new FileOutputStream(zipFile);
+		ZipOutputStream zipOut = new ZipOutputStream(fos);
+		for (MultipartFile srcFile : directory) {
+			addToZip(zipFile, srcFile.getOriginalFilename(), zipOut);
+		}
+		
+		addToZip(zipFile, datFile.getName(), zipOut);
+		
+		zipOut.close();
+		fos.close();
+		return zipFile;
+	}
+
+	/**
+	 * 檔案加入ZIP
+	 * 
+	 * @param file
+	 * @param fileName
+	 * @param zipOut
+	 * @throws IOException
+	 */
+	private void addToZip(File file, String fileName, ZipOutputStream zipOut) throws IOException {
+		try (FileInputStream fis = new FileInputStream(file)) {
+			ZipEntry zipEntry = new ZipEntry(fileName);
+			zipOut.putNextEntry(zipEntry);
+
+			byte[] bytes = new byte[1024];
+			int length;
+			while ((length = fis.read(bytes)) >= 0) {
+				zipOut.write(bytes, 0, length);
+			}
+			zipOut.closeEntry();
+		}
+	}
+    
+	private void deleteDirectory(File directory) {
+		File[] files = directory.listFiles();
+		if (files != null) {
+			for (File file : files) {
+				file.delete();
+			}
+		}
+	}
